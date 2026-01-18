@@ -16,8 +16,9 @@ export default function AudioPlayer({ item, onClose }: Props) {
 
   const audioUrl = getAudioUrl(item.id);
   const [imageLoaded, setImageLoaded] = useState(false);
-  // Always try to load thumbnail
-  const showThumbnail = !imageError;
+  // Only try to load thumbnail if thumbnail_path exists
+  const hasThumbnail = !!item.thumbnail_path;
+  const showThumbnail = hasThumbnail && !imageError;
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -47,10 +48,11 @@ export default function AudioPlayer({ item, onClose }: Props) {
     };
   }, []);
 
-  // Reset image error when item changes
+  // Reset image state when item or thumbnail changes
   useEffect(() => {
     setImageError(false);
-  }, [item.id]);
+    setImageLoaded(false);
+  }, [item.id, item.thumbnail_path]);
 
   const togglePlay = () => {
     const audio = audioRef.current;

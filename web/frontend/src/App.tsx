@@ -184,9 +184,8 @@ function MainApp() {
         <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <img src={heartmulaLogo} alt="HeartMuLa" className="h-10 w-auto" />
-              <h1 className="text-2xl font-bold text-white">HeartMuLa</h1>
-            </div>
+              <img src={heartmulaLogo} alt="HeartMuLa" className="h-14 w-auto" />
+                          </div>
             <div className="flex items-center gap-4">
               {systemStatus && (
                 <div className="flex items-center gap-4 text-sm">

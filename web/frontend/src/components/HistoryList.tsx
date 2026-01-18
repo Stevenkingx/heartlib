@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { deleteHistoryItem, getThumbnailUrl } from '../api';
 import type { HistoryResponse, HistoryItem } from '../types';
 
@@ -129,6 +129,12 @@ function HistoryItemCard({ item, onPlay, onDelete, deleting }: HistoryItemCardPr
   const [imageError, setImageError] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
 
+  // Reset error state when thumbnail_path changes (thumbnail becomes available)
+  useEffect(() => {
+    setImageError(false);
+    setImageLoaded(false);
+  }, [item.thumbnail_path]);
+
   const formatDuration = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
     const mins = Math.floor(seconds / 60);
@@ -144,8 +150,9 @@ function HistoryItemCard({ item, onPlay, onDelete, deleting }: HistoryItemCardPr
     });
   };
 
-  // Always try to load thumbnail - API returns 404 if not available
-  const showThumbnail = !imageError;
+  // Only try to load thumbnail if thumbnail_path exists
+  const hasThumbnail = !!item.thumbnail_path;
+  const showThumbnail = hasThumbnail && !imageError;
 
   return (
     <div className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700 hover:border-gray-600 transition-colors group">
