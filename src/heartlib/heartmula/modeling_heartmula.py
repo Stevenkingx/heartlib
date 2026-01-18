@@ -152,16 +152,23 @@ class HeartMuLa(PreTrainedModel):
         self.muq_linear = nn.Linear(config.muq_dim, backbone_dim)
         self.post_init()
 
-    def setup_caches(self, max_batch_size: int):
+    def setup_caches(self, max_batch_size: int, cache_device: torch.device = None):
         dtype = next(self.parameters()).dtype
-        device = next(self.parameters()).device
+        # Use specified cache_device or find first CUDA device, fallback to model device
+        if cache_device is None:
+            for p in self.parameters():
+                if p.device.type == "cuda":
+                    cache_device = p.device
+                    break
+            if cache_device is None:
+                cache_device = next(self.parameters()).device
 
         try:
             self.reset_caches()
         except RuntimeError:
             pass
 
-        with device:
+        with cache_device:
             self.backbone.setup_caches(max_batch_size, dtype)
             self.decoder.setup_caches(
                 max_batch_size,
@@ -171,11 +178,11 @@ class HeartMuLa(PreTrainedModel):
 
         self.register_buffer(
             "backbone_causal_mask",
-            _create_causal_mask(self.backbone.max_seq_len, device),
+            _create_causal_mask(self.backbone.max_seq_len, cache_device),
         )
         self.register_buffer(
             "decoder_causal_mask",
-            _create_causal_mask(self.config.audio_num_codebooks, device),
+            _create_causal_mask(self.config.audio_num_codebooks, cache_device),
         )
 
     def generate_frame(

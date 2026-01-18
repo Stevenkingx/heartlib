@@ -3,6 +3,7 @@ import GenerationForm from './components/GenerationForm';
 import AudioPlayer from './components/AudioPlayer';
 import QueueList from './components/QueueList';
 import HistoryList from './components/HistoryList';
+import heartmulaLogo from './assets/heartmula.svg';
 import {
   getStatus,
   getQueueStatus,
@@ -121,7 +122,10 @@ function App() {
       <header className="bg-gray-800 border-b border-gray-700">
         <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-white">HeartMuLa</h1>
+            <div className="flex items-center gap-3">
+              <img src={heartmulaLogo} alt="HeartMuLa" className="h-10 w-auto" />
+              <h1 className="text-2xl font-bold text-white">HeartMuLa</h1>
+            </div>
             {systemStatus && (
               <div className="flex items-center gap-4 text-sm">
                 <span className={`flex items-center gap-1 ${systemStatus.gpu_available ? 'text-green-400' : 'text-red-400'}`}>
@@ -181,6 +185,7 @@ function App() {
           <GenerationForm
             onGenerate={handleGenerate}
             gpuAvailable={systemStatus?.gpu_available ?? false}
+            openaiConfigured={systemStatus?.openai_configured ?? false}
           />
         )}
 

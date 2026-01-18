@@ -3,7 +3,7 @@ import asyncio
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -16,9 +16,14 @@ from .models import (
     HistoryItem,
     ProgressUpdate,
     SystemStatus,
+    AILyricsRequest,
+    AILyricsResponse,
+    AIThumbnailRequest,
+    AIThumbnailResponse,
 )
 from .queue import get_queue, GenerationQueue
 from . import database
+from . import openai_service
 
 
 class ConnectionManager:
@@ -46,15 +51,27 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 queue: Optional[GenerationQueue] = None
+progress_task: Optional[asyncio.Task] = None
 
 
-async def progress_callback(update: ProgressUpdate):
-    await manager.broadcast(update.model_dump())
+async def progress_broadcaster():
+    """Background task to broadcast progress updates from the queue"""
+    global queue
+    while True:
+        try:
+            if queue and manager.active_connections:
+                updates = queue.get_pending_updates()
+                for update in updates:
+                    await manager.broadcast(update.model_dump())
+            await asyncio.sleep(0.1)  # Check every 100ms
+        except Exception as e:
+            print(f"Progress broadcaster error: {e}")
+            await asyncio.sleep(1)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global queue
+    global queue, progress_task
     model_path = os.environ.get("HEARTMULA_MODEL_PATH", "./ckpt")
     version = os.environ.get("HEARTMULA_VERSION", "3B")
     use_fp16 = os.environ.get("HEARTMULA_FP16", "false").lower() == "true"
@@ -62,10 +79,18 @@ async def lifespan(app: FastAPI):
     queue = get_queue(model_path, version, use_fp16)
     database.init_database()
 
+    # Start progress broadcaster
+    progress_task = asyncio.create_task(progress_broadcaster())
+
     yield
 
-    # Cleanup if needed
-    pass
+    # Cleanup
+    if progress_task:
+        progress_task.cancel()
+        try:
+            await progress_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -91,6 +116,7 @@ async def get_status():
         gpu_name=queue.gpu_name,
         model_loaded=queue.model_loaded,
         queue_length=len(queue.queue) + (1 if queue.current_entry else 0),
+        openai_configured=openai_service.is_openai_configured(),
     )
 
 
@@ -177,28 +203,80 @@ async def get_audio(entry_id: str):
     )
 
 
+@app.get("/api/thumbnail/{entry_id}")
+async def get_thumbnail(entry_id: str):
+    item = database.get_generation_by_id(entry_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Generation not found")
+
+    if not item.thumbnail_path or not os.path.exists(item.thumbnail_path):
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+
+    return FileResponse(
+        item.thumbnail_path,
+        media_type="image/png",
+        filename=f"{item.title or entry_id}.png",
+    )
+
+
+@app.post("/api/ai/lyrics", response_model=AILyricsResponse)
+async def generate_ai_lyrics(request: AILyricsRequest):
+    """Generate lyrics, title, and tags using OpenAI."""
+    if not openai_service.is_openai_configured():
+        raise HTTPException(status_code=503, detail="OpenAI API not configured. Set OPENAI_API_KEY environment variable.")
+
+    try:
+        result = await openai_service.generate_lyrics(request.prompt, request.language)
+        return AILyricsResponse(
+            title=result.title,
+            tags=result.tags,
+            lyrics=result.lyrics,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ai/thumbnail", response_model=AIThumbnailResponse)
+async def generate_ai_thumbnail(request: AIThumbnailRequest):
+    """Generate a thumbnail image using DALL-E."""
+    if not openai_service.is_openai_configured():
+        raise HTTPException(status_code=503, detail="OpenAI API not configured. Set OPENAI_API_KEY environment variable.")
+
+    try:
+        result = await openai_service.generate_thumbnail(
+            title=request.title,
+            tags=request.tags,
+            lyrics_preview=request.lyrics_preview,
+            style=request.style,
+        )
+        return AIThumbnailResponse(
+            image_base64=result.image_base64,
+            prompt_used=result.prompt_used,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.websocket("/ws/progress")
 async def websocket_progress(websocket: WebSocket):
     await manager.connect(websocket)
 
-    loop = asyncio.get_event_loop()
-
-    async def async_callback(update: ProgressUpdate):
-        await manager.broadcast(update.model_dump())
-
-    queue.add_async_callback(async_callback)
-
     try:
         while True:
             try:
-                data = await websocket.receive_text()
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 if data == "ping":
                     await websocket.send_text("pong")
-            except WebSocketDisconnect:
-                break
+            except asyncio.TimeoutError:
+                # Send ping to keep connection alive
+                try:
+                    await websocket.send_text("ping")
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        pass
     finally:
         manager.disconnect(websocket)
-        queue.remove_callback(async_callback)
 
 
 if __name__ == "__main__":

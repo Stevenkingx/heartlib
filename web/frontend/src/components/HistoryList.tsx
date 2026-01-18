@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { deleteHistoryItem } from '../api';
+import { deleteHistoryItem, getThumbnailUrl } from '../api';
 import type { HistoryResponse, HistoryItem } from '../types';
 
 interface Props {
@@ -79,7 +79,7 @@ export default function HistoryList({ history, onRefresh, onPlay, onDelete }: Pr
         </div>
       ) : (
         <>
-          <div className="grid gap-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {history.items.map((item) => (
               <HistoryItemCard
                 key={item.id}
@@ -126,6 +126,8 @@ interface HistoryItemCardProps {
 }
 
 function HistoryItemCard({ item, onPlay, onDelete, deleting }: HistoryItemCardProps) {
+  const [imageError, setImageError] = useState(false);
+
   const formatDuration = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
     const mins = Math.floor(seconds / 60);
@@ -138,64 +140,80 @@ function HistoryItemCard({ item, onPlay, onDelete, deleting }: HistoryItemCardPr
     return date.toLocaleDateString(undefined, {
       month: 'short',
       day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
     });
   };
 
+  const hasThumbnail = item.thumbnail_path && !imageError;
+
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-gray-600 transition-colors">
-      <div className="flex items-start gap-4">
-        <button
-          onClick={onPlay}
-          className="w-12 h-12 flex items-center justify-center bg-blue-600 hover:bg-blue-700 rounded-full text-white transition-colors flex-shrink-0"
-        >
-          <svg className="w-5 h-5 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M8 5v14l11-7z" />
-          </svg>
-        </button>
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between">
-            <div>
-              <h4 className="text-white font-medium truncate">
-                {item.title || `Generation ${item.id.slice(0, 8)}`}
-              </h4>
-              <p className="text-sm text-gray-400">
-                {formatDuration(item.duration_ms)} &bull; {formatDate(item.created_at)}
-              </p>
-            </div>
-            <button
-              onClick={onDelete}
-              disabled={deleting}
-              className="text-gray-400 hover:text-red-400 disabled:text-gray-600 transition-colors p-1 flex-shrink-0"
-              title="Delete"
-            >
-              {deleting ? (
-                <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              )}
-            </button>
+    <div className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700 hover:border-gray-600 transition-colors group">
+      {/* Thumbnail / Play Area */}
+      <button
+        onClick={onPlay}
+        className="relative w-full aspect-square bg-gray-900 overflow-hidden"
+      >
+        {hasThumbnail ? (
+          <img
+            src={getThumbnailUrl(item.id)}
+            alt={item.title || 'Song thumbnail'}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            onError={() => setImageError(true)}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-800 to-gray-900">
+            <svg className="w-16 h-16 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+            </svg>
           </div>
-
-          <div className="mt-2 grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-gray-500">Tags:</span>
-              <p className="text-gray-300 truncate">{item.tags}</p>
-            </div>
-            <div>
-              <span className="text-gray-500">Settings:</span>
-              <p className="text-gray-300">
-                T:{item.temperature.toFixed(1)} K:{item.topk} CFG:{item.cfg_scale.toFixed(1)}
-              </p>
-            </div>
+        )}
+        {/* Play overlay */}
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+          <div className="w-16 h-16 rounded-full bg-white/90 flex items-center justify-center">
+            <svg className="w-8 h-8 text-gray-900 ml-1" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
           </div>
+        </div>
+        {/* Duration badge */}
+        <div className="absolute bottom-2 right-2 px-2 py-1 bg-black/70 rounded text-xs text-white">
+          {formatDuration(item.duration_ms)}
+        </div>
+      </button>
+
+      {/* Info */}
+      <div className="p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <h4 className="text-white font-medium truncate">
+              {item.title || `Generation ${item.id.slice(0, 8)}`}
+            </h4>
+            <p className="text-xs text-gray-400 truncate mt-0.5">
+              {item.tags}
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              {formatDate(item.created_at)}
+            </p>
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            disabled={deleting}
+            className="text-gray-400 hover:text-red-400 disabled:text-gray-600 transition-colors p-1 flex-shrink-0"
+            title="Delete"
+          >
+            {deleting ? (
+              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            )}
+          </button>
         </div>
       </div>
     </div>

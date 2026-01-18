@@ -50,6 +50,7 @@ class HistoryItem(BaseModel):
     lyrics: str
     tags: str
     audio_path: str
+    thumbnail_path: Optional[str] = None
     created_at: datetime
     duration_ms: int
     temperature: float
@@ -77,3 +78,27 @@ class SystemStatus(BaseModel):
     gpu_name: Optional[str]
     model_loaded: bool
     queue_length: int
+    openai_configured: bool = False
+
+
+class AILyricsRequest(BaseModel):
+    prompt: str = Field(..., description="Description of the song to generate")
+    language: str = Field("english", description="Language for the lyrics")
+
+
+class AILyricsResponse(BaseModel):
+    title: str
+    tags: str
+    lyrics: str
+
+
+class AIThumbnailRequest(BaseModel):
+    title: str = Field(..., description="Song title")
+    tags: str = Field(..., description="Music tags")
+    lyrics_preview: str = Field("", description="Preview of lyrics for context")
+    style: str = Field("album cover art", description="Art style for the thumbnail")
+
+
+class AIThumbnailResponse(BaseModel):
+    image_base64: str
+    prompt_used: str

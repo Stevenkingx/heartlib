@@ -38,6 +38,7 @@ export interface HistoryItem {
   lyrics: string;
   tags: string;
   audio_path: string;
+  thumbnail_path: string | null;
   created_at: string;
   duration_ms: number;
   temperature: number;
@@ -65,4 +66,28 @@ export interface SystemStatus {
   gpu_name: string | null;
   model_loaded: boolean;
   queue_length: number;
+  openai_configured: boolean;
+}
+
+export interface AILyricsRequest {
+  prompt: string;
+  language?: string;
+}
+
+export interface AILyricsResponse {
+  title: string;
+  tags: string;
+  lyrics: string;
+}
+
+export interface AIThumbnailRequest {
+  title: string;
+  tags: string;
+  lyrics_preview?: string;
+  style?: string;
+}
+
+export interface AIThumbnailResponse {
+  image_base64: string;
+  prompt_used: string;
 }

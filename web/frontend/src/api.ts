@@ -5,6 +5,10 @@ import type {
   HistoryResponse,
   HistoryItem,
   SystemStatus,
+  AILyricsRequest,
+  AILyricsResponse,
+  AIThumbnailRequest,
+  AIThumbnailResponse,
 } from './types';
 
 const API_BASE = '/api';
@@ -70,6 +74,10 @@ export function getAudioUrl(id: string): string {
   return `${API_BASE}/audio/${id}`;
 }
 
+export function getThumbnailUrl(id: string): string {
+  return `${API_BASE}/thumbnail/${id}`;
+}
+
 export function createWebSocket(
   onMessage: (data: unknown) => void,
   onClose?: () => void
@@ -100,4 +108,18 @@ export function createWebSocket(
   ws.addEventListener('close', () => clearInterval(pingInterval));
 
   return ws;
+}
+
+export async function generateAILyrics(request: AILyricsRequest): Promise<AILyricsResponse> {
+  return fetchJson<AILyricsResponse>(`${API_BASE}/ai/lyrics`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function generateAIThumbnail(request: AIThumbnailRequest): Promise<AIThumbnailResponse> {
+  return fetchJson<AIThumbnailResponse>(`${API_BASE}/ai/thumbnail`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
 }

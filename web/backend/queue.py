@@ -2,9 +2,11 @@ import os
 import sys
 import uuid
 import threading
+import queue as thread_queue
+import base64
 import asyncio
 from datetime import datetime
-from typing import Optional, Callable
+from typing import Optional
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -13,6 +15,7 @@ from tqdm import tqdm
 
 from .models import GenerationStatus, QueueItem, ProgressUpdate
 from . import database
+from . import openai_service
 
 # Add src to path for heartlib imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
@@ -55,8 +58,8 @@ class GenerationQueue:
         self._processing_thread: Optional[threading.Thread] = None
         self._running = False
 
-        self._progress_callbacks: list[Callable[[ProgressUpdate], None]] = []
-        self._async_callbacks: list[Callable[[ProgressUpdate], asyncio.Future]] = []
+        # Thread-safe queue for progress updates
+        self._progress_queue: thread_queue.Queue[ProgressUpdate] = thread_queue.Queue()
 
         self.output_dir = os.path.join(os.path.dirname(__file__), "..", "data", "audio")
         os.makedirs(self.output_dir, exist_ok=True)
@@ -149,33 +152,20 @@ class GenerationQueue:
         with self._lock:
             return self.current_entry.id if self.current_entry else None
 
-    def add_progress_callback(self, callback: Callable[[ProgressUpdate], None]):
-        self._progress_callbacks.append(callback)
-
-    def add_async_callback(self, callback: Callable[[ProgressUpdate], asyncio.Future]):
-        self._async_callbacks.append(callback)
-
-    def remove_callback(self, callback):
-        if callback in self._progress_callbacks:
-            self._progress_callbacks.remove(callback)
-        if callback in self._async_callbacks:
-            self._async_callbacks.remove(callback)
+    def get_pending_updates(self) -> list[ProgressUpdate]:
+        """Get all pending progress updates (non-blocking)"""
+        updates = []
+        while True:
+            try:
+                update = self._progress_queue.get_nowait()
+                updates.append(update)
+            except thread_queue.Empty:
+                break
+        return updates
 
     def _notify_progress(self, update: ProgressUpdate):
-        for callback in self._progress_callbacks:
-            try:
-                callback(update)
-            except Exception:
-                pass
-
-        for callback in self._async_callbacks:
-            try:
-                asyncio.run_coroutine_threadsafe(
-                    callback(update),
-                    asyncio.get_event_loop()
-                )
-            except Exception:
-                pass
+        """Thread-safe progress notification"""
+        self._progress_queue.put(update)
 
     def _ensure_processing(self):
         with self._lock:
@@ -213,6 +203,8 @@ class GenerationQueue:
             try:
                 self._process_entry(entry)
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 entry.status = GenerationStatus.FAILED
                 entry.error_message = str(e)
                 self._notify_progress(ProgressUpdate(
@@ -232,12 +224,16 @@ class GenerationQueue:
 
         output_path = os.path.join(self.output_dir, f"{entry.id}.wav")
 
-        original_tqdm = tqdm.__init__
+        # Store references for the patched tqdm
         queue_ref = self
         entry_ref = entry
+        last_update = [0]  # Use list to allow modification in nested function
+
+        # Patch tqdm to capture progress
+        original_tqdm_init = tqdm.__init__
 
         def patched_tqdm_init(self_tqdm, *args, **kwargs):
-            original_tqdm(self_tqdm, *args, **kwargs)
+            original_tqdm_init(self_tqdm, *args, **kwargs)
             original_update = self_tqdm.update
 
             def patched_update(n=1):
@@ -247,13 +243,16 @@ class GenerationQueue:
                 if entry_ref.id in queue_ref.cancelled_ids:
                     raise InterruptedError("Generation cancelled")
 
-                queue_ref._notify_progress(ProgressUpdate(
-                    id=entry_ref.id,
-                    status=GenerationStatus.PROCESSING,
-                    progress=self_tqdm.n,
-                    total_frames=entry_ref.total_frames,
-                    message=f"Generating frame {self_tqdm.n}/{entry_ref.total_frames}",
-                ))
+                # Send update every 10 frames to avoid flooding
+                if self_tqdm.n - last_update[0] >= 10 or self_tqdm.n == 1:
+                    last_update[0] = self_tqdm.n
+                    queue_ref._notify_progress(ProgressUpdate(
+                        id=entry_ref.id,
+                        status=GenerationStatus.PROCESSING,
+                        progress=self_tqdm.n,
+                        total_frames=entry_ref.total_frames,
+                        message=f"Generating frame {self_tqdm.n}/{entry_ref.total_frames}",
+                    ))
                 return result
 
             self_tqdm.update = patched_update
@@ -297,8 +296,11 @@ class GenerationQueue:
                 status=GenerationStatus.COMPLETED,
                 progress=entry.progress,
                 total_frames=entry.total_frames,
-                message="Generation complete!",
+                message="Generation complete! Generating thumbnail...",
             ))
+
+            # Generate thumbnail if OpenAI is configured
+            self._generate_thumbnail(entry)
 
         except InterruptedError:
             entry.status = GenerationStatus.CANCELLED
@@ -312,7 +314,48 @@ class GenerationQueue:
             if os.path.exists(output_path):
                 os.remove(output_path)
         finally:
-            tqdm.__init__ = original_tqdm
+            tqdm.__init__ = original_tqdm_init
+
+    def _generate_thumbnail(self, entry: QueueEntry):
+        """Generate thumbnail for a completed song using OpenAI DALL-E"""
+        if not openai_service.is_openai_configured():
+            print("OpenAI not configured, skipping thumbnail generation")
+            return
+
+        try:
+            # Run async function in a new event loop since we're in a thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                result = loop.run_until_complete(
+                    openai_service.generate_thumbnail(
+                        title=entry.title or f"Generation {entry.id[:8]}",
+                        tags=entry.tags,
+                        lyrics_preview=entry.lyrics[:200] if entry.lyrics else "",
+                    )
+                )
+
+                # Save the thumbnail as a PNG file
+                thumbnail_dir = os.path.join(os.path.dirname(__file__), "..", "data", "thumbnails")
+                os.makedirs(thumbnail_dir, exist_ok=True)
+                thumbnail_path = os.path.join(thumbnail_dir, f"{entry.id}.png")
+
+                image_data = base64.b64decode(result.image_base64)
+                with open(thumbnail_path, "wb") as f:
+                    f.write(image_data)
+
+                # Update the database with thumbnail path
+                database.update_thumbnail(entry.id, thumbnail_path)
+                print(f"Thumbnail generated for {entry.id}")
+
+            finally:
+                loop.close()
+
+        except Exception as e:
+            print(f"Failed to generate thumbnail: {e}")
+            import traceback
+            traceback.print_exc()
 
 
 _queue_instance: Optional[GenerationQueue] = None

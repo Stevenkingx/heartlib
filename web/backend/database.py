@@ -32,6 +32,7 @@ def init_database():
                 lyrics TEXT NOT NULL,
                 tags TEXT NOT NULL,
                 audio_path TEXT NOT NULL,
+                thumbnail_path TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 duration_ms INTEGER DEFAULT 0,
                 temperature REAL DEFAULT 1.0,
@@ -44,6 +45,13 @@ def init_database():
         """)
         conn.commit()
 
+        # Migration: add thumbnail_path column if it doesn't exist
+        try:
+            conn.execute("ALTER TABLE generations ADD COLUMN thumbnail_path TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
 
 def add_generation(
     id: str,
@@ -55,15 +63,16 @@ def add_generation(
     temperature: float,
     topk: int,
     cfg_scale: float,
+    thumbnail_path: Optional[str] = None,
 ) -> HistoryItem:
     created_at = datetime.now()
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO generations (id, title, lyrics, tags, audio_path, created_at, duration_ms, temperature, topk, cfg_scale)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO generations (id, title, lyrics, tags, audio_path, thumbnail_path, created_at, duration_ms, temperature, topk, cfg_scale)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (id, title, lyrics, tags, audio_path, created_at, duration_ms, temperature, topk, cfg_scale),
+            (id, title, lyrics, tags, audio_path, thumbnail_path, created_at, duration_ms, temperature, topk, cfg_scale),
         )
         conn.commit()
 
@@ -73,12 +82,23 @@ def add_generation(
         lyrics=lyrics,
         tags=tags,
         audio_path=audio_path,
+        thumbnail_path=thumbnail_path,
         created_at=created_at,
         duration_ms=duration_ms,
         temperature=temperature,
         topk=topk,
         cfg_scale=cfg_scale,
     )
+
+
+def update_thumbnail(id: str, thumbnail_path: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "UPDATE generations SET thumbnail_path = ? WHERE id = ?",
+            (thumbnail_path, id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
 
 def get_generations(page: int = 1, page_size: int = 20, search: Optional[str] = None) -> tuple[list[HistoryItem], int]:
@@ -115,6 +135,7 @@ def get_generations(page: int = 1, page_size: int = 20, search: Optional[str] = 
                 lyrics=row["lyrics"],
                 tags=row["tags"],
                 audio_path=row["audio_path"],
+                thumbnail_path=row["thumbnail_path"],
                 created_at=datetime.fromisoformat(row["created_at"]) if isinstance(row["created_at"], str) else row["created_at"],
                 duration_ms=row["duration_ms"],
                 temperature=row["temperature"],
@@ -137,6 +158,7 @@ def get_generation_by_id(id: str) -> Optional[HistoryItem]:
                 lyrics=row["lyrics"],
                 tags=row["tags"],
                 audio_path=row["audio_path"],
+                thumbnail_path=row["thumbnail_path"],
                 created_at=datetime.fromisoformat(row["created_at"]) if isinstance(row["created_at"], str) else row["created_at"],
                 duration_ms=row["duration_ms"],
                 temperature=row["temperature"],
@@ -148,11 +170,14 @@ def get_generation_by_id(id: str) -> Optional[HistoryItem]:
 
 def delete_generation(id: str) -> bool:
     with get_connection() as conn:
-        row = conn.execute("SELECT audio_path FROM generations WHERE id = ?", (id,)).fetchone()
+        row = conn.execute("SELECT audio_path, thumbnail_path FROM generations WHERE id = ?", (id,)).fetchone()
         if row:
             audio_path = row["audio_path"]
-            if os.path.exists(audio_path):
+            thumbnail_path = row["thumbnail_path"]
+            if audio_path and os.path.exists(audio_path):
                 os.remove(audio_path)
+            if thumbnail_path and os.path.exists(thumbnail_path):
+                os.remove(thumbnail_path)
             conn.execute("DELETE FROM generations WHERE id = ?", (id,))
             conn.commit()
             return True

@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
-import { getAudioUrl } from '../api';
+import { getAudioUrl, getThumbnailUrl } from '../api';
 import type { HistoryItem } from '../types';
 
 interface Props {
@@ -12,8 +12,10 @@ export default function AudioPlayer({ item, onClose }: Props) {
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [imageError, setImageError] = useState(false);
 
   const audioUrl = getAudioUrl(item.id);
+  const hasThumbnail = item.thumbnail_path && !imageError;
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -31,6 +33,9 @@ export default function AudioPlayer({ item, onClose }: Props) {
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
 
+    // Auto-play on mount
+    audio.play().catch(() => {});
+
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
@@ -39,6 +44,11 @@ export default function AudioPlayer({ item, onClose }: Props) {
       audio.removeEventListener('pause', handlePause);
     };
   }, []);
+
+  // Reset image error when item changes
+  useEffect(() => {
+    setImageError(false);
+  }, [item.id]);
 
   const togglePlay = () => {
     const audio = audioRef.current;
@@ -81,6 +91,25 @@ export default function AudioPlayer({ item, onClose }: Props) {
 
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center gap-4">
+          {/* Thumbnail */}
+          <div className="w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 bg-gray-900">
+            {hasThumbnail ? (
+              <img
+                src={getThumbnailUrl(item.id)}
+                alt={item.title || 'Song thumbnail'}
+                className="w-full h-full object-cover"
+                onError={() => setImageError(true)}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg>
+              </div>
+            )}
+          </div>
+
+          {/* Play Button */}
           <button
             onClick={togglePlay}
             className="w-12 h-12 flex items-center justify-center bg-blue-600 hover:bg-blue-700 rounded-full text-white transition-colors flex-shrink-0"
@@ -96,11 +125,17 @@ export default function AudioPlayer({ item, onClose }: Props) {
             )}
           </button>
 
+          {/* Title and Progress */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-1">
-              <h4 className="text-white font-medium truncate">
-                {item.title || `Generation ${item.id.slice(0, 8)}`}
-              </h4>
+              <div className="min-w-0">
+                <h4 className="text-white font-medium truncate">
+                  {item.title || `Generation ${item.id.slice(0, 8)}`}
+                </h4>
+                <p className="text-xs text-gray-400 truncate">
+                  {item.tags}
+                </p>
+              </div>
               <span className="text-sm text-gray-400 ml-4 flex-shrink-0">
                 {formatTime(currentTime)} / {formatTime(duration || item.duration_ms / 1000)}
               </span>
@@ -116,6 +151,7 @@ export default function AudioPlayer({ item, onClose }: Props) {
             />
           </div>
 
+          {/* Download */}
           <button
             onClick={handleDownload}
             className="p-2 text-gray-400 hover:text-white transition-colors flex-shrink-0"
@@ -126,6 +162,7 @@ export default function AudioPlayer({ item, onClose }: Props) {
             </svg>
           </button>
 
+          {/* Close */}
           <button
             onClick={onClose}
             className="p-2 text-gray-400 hover:text-white transition-colors flex-shrink-0"

@@ -11,6 +11,13 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Load environment variables from .env file if it exists
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 print_status() {
     echo -e "${BLUE}[*]${NC} $1"
 }
@@ -110,6 +117,9 @@ export HEARTMULA_FP16="$USE_FP16"
 # ROCm environment variables (for AMD GPUs)
 export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 export HSA_OVERRIDE_GFX_VERSION="${HSA_OVERRIDE_GFX_VERSION:-12.0.1}"
+
+# OpenAI API (for AI Assist features)
+# OPENAI_API_KEY should be set in your environment
 
 echo "================================"
 echo "HeartMuLa Web UI"
