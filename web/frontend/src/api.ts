@@ -9,23 +9,64 @@ import type {
   AILyricsResponse,
   AIThumbnailRequest,
   AIThumbnailResponse,
+  LoginRequest,
+  RegisterRequest,
+  AuthResponse,
+  User,
 } from './types';
 
 const API_BASE = '/api';
+
+// Auth header getter - will be set by the AuthContext
+let getAuthHeader: () => Record<string, string> = () => ({});
+
+export function setAuthHeaderGetter(getter: () => Record<string, string>) {
+  getAuthHeader = getter;
+}
+
+// Logout callback for 401 responses
+let onUnauthorized: (() => void) | null = null;
+
+export function setOnUnauthorized(callback: () => void) {
+  onUnauthorized = callback;
+}
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...getAuthHeader(),
       ...options?.headers,
     },
   });
   if (!response.ok) {
+    if (response.status === 401 && onUnauthorized) {
+      onUnauthorized();
+    }
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
     throw new Error(error.detail || 'Request failed');
   }
   return response.json();
+}
+
+// Auth API
+export async function login(request: LoginRequest): Promise<AuthResponse> {
+  return fetchJson<AuthResponse>(`${API_BASE}/auth/login`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function register(request: RegisterRequest): Promise<AuthResponse> {
+  return fetchJson<AuthResponse>(`${API_BASE}/auth/register`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function getCurrentUser(): Promise<User> {
+  return fetchJson<User>(`${API_BASE}/auth/me`);
 }
 
 export async function getStatus(): Promise<SystemStatus> {

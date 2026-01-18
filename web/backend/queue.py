@@ -32,6 +32,7 @@ class QueueEntry:
     temperature: float
     topk: int
     cfg_scale: float
+    user_id: Optional[str] = None
     status: GenerationStatus = GenerationStatus.PENDING
     progress: int = 0
     total_frames: int = 0
@@ -90,6 +91,7 @@ class GenerationQueue:
         temperature: float = 1.0,
         topk: int = 50,
         cfg_scale: float = 1.5,
+        user_id: Optional[str] = None,
     ) -> str:
         entry_id = str(uuid.uuid4())
         entry = QueueEntry(
@@ -101,6 +103,7 @@ class GenerationQueue:
             temperature=temperature,
             topk=topk,
             cfg_scale=cfg_scale,
+            user_id=user_id,
             total_frames=max_audio_length_ms // 80,
         )
 
@@ -109,6 +112,16 @@ class GenerationQueue:
 
         self._ensure_processing()
         return entry_id
+
+    def get_entry_user_id(self, entry_id: str) -> Optional[str]:
+        """Get the user_id for a queue entry."""
+        with self._lock:
+            if self.current_entry and self.current_entry.id == entry_id:
+                return self.current_entry.user_id
+            for entry in self.queue:
+                if entry.id == entry_id:
+                    return entry.user_id
+        return None
 
     def cancel(self, entry_id: str) -> bool:
         with self._lock:
@@ -246,13 +259,24 @@ class GenerationQueue:
                 # Send update every 10 frames to avoid flooding
                 if self_tqdm.n - last_update[0] >= 10 or self_tqdm.n == 1:
                     last_update[0] = self_tqdm.n
-                    queue_ref._notify_progress(ProgressUpdate(
-                        id=entry_ref.id,
-                        status=GenerationStatus.PROCESSING,
-                        progress=self_tqdm.n,
-                        total_frames=entry_ref.total_frames,
-                        message=f"Generating frame {self_tqdm.n}/{entry_ref.total_frames}",
-                    ))
+
+                    # Check if generation is complete - decoding phase starts
+                    if self_tqdm.n >= entry_ref.total_frames:
+                        queue_ref._notify_progress(ProgressUpdate(
+                            id=entry_ref.id,
+                            status=GenerationStatus.PROCESSING,
+                            progress=self_tqdm.n,
+                            total_frames=entry_ref.total_frames,
+                            message="Decoding audio...",
+                        ))
+                    else:
+                        queue_ref._notify_progress(ProgressUpdate(
+                            id=entry_ref.id,
+                            status=GenerationStatus.PROCESSING,
+                            progress=self_tqdm.n,
+                            total_frames=entry_ref.total_frames,
+                            message=f"Generating frame {self_tqdm.n}/{entry_ref.total_frames}",
+                        ))
                 return result
 
             self_tqdm.update = patched_update
@@ -289,6 +313,7 @@ class GenerationQueue:
                 temperature=entry.temperature,
                 topk=entry.topk,
                 cfg_scale=entry.cfg_scale,
+                user_id=entry.user_id,
             )
 
             self._notify_progress(ProgressUpdate(

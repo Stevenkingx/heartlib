@@ -3,12 +3,19 @@ import GenerationForm from './components/GenerationForm';
 import AudioPlayer from './components/AudioPlayer';
 import QueueList from './components/QueueList';
 import HistoryList from './components/HistoryList';
+import LoginForm from './components/LoginForm';
+import RegisterForm from './components/RegisterForm';
+import UserMenu from './components/UserMenu';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import heartmulaLogo from './assets/heartmula.svg';
 import {
   getStatus,
   getQueueStatus,
   getHistory,
+  getHistoryItem,
   createWebSocket,
+  setAuthHeaderGetter,
+  setOnUnauthorized,
 } from './api';
 import type {
   SystemStatus,
@@ -19,14 +26,23 @@ import type {
 } from './types';
 
 type Tab = 'generate' | 'queue' | 'history';
+type AuthView = 'login' | 'register';
 
-function App() {
+function MainApp() {
+  const { isAuthenticated, isLoading, logout, getAuthHeader } = useAuth();
+  const [authView, setAuthView] = useState<AuthView>('login');
   const [activeTab, setActiveTab] = useState<Tab>('generate');
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const [history, setHistory] = useState<HistoryResponse | null>(null);
   const [selectedAudio, setSelectedAudio] = useState<HistoryItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Set up auth header getter and unauthorized handler
+  useEffect(() => {
+    setAuthHeaderGetter(getAuthHeader);
+    setOnUnauthorized(logout);
+  }, [getAuthHeader, logout]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -38,41 +54,46 @@ function App() {
   }, []);
 
   const fetchQueue = useCallback(async () => {
+    if (!isAuthenticated) return;
     try {
       const queue = await getQueueStatus();
       setQueueStatus(queue);
     } catch (e) {
       console.error('Failed to fetch queue:', e);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   const fetchHistory = useCallback(async (page = 1, search?: string) => {
+    if (!isAuthenticated) return;
     try {
       const hist = await getHistory(page, 20, search);
       setHistory(hist);
     } catch (e) {
       console.error('Failed to fetch history:', e);
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     fetchStatus();
-    fetchQueue();
-    fetchHistory();
-
     const statusInterval = setInterval(fetchStatus, 10000);
-
-    return () => {
-      clearInterval(statusInterval);
-    };
-  }, [fetchStatus, fetchQueue, fetchHistory]);
+    return () => clearInterval(statusInterval);
+  }, [fetchStatus]);
 
   useEffect(() => {
+    if (isAuthenticated) {
+      fetchQueue();
+      fetchHistory();
+    }
+  }, [isAuthenticated, fetchQueue, fetchHistory]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
     let ws: WebSocket | null = null;
 
     const connectWebSocket = () => {
       ws = createWebSocket(
-        (data) => {
+        async (data) => {
           const update = data as ProgressUpdate;
           setQueueStatus((prev) => {
             if (!prev) return prev;
@@ -82,11 +103,27 @@ function App() {
                 : item
             );
             if (update.status === 'completed' || update.status === 'failed' || update.status === 'cancelled') {
-              fetchHistory();
               return { ...prev, items: items.filter((item) => item.id !== update.id) };
             }
             return { ...prev, items };
           });
+
+          // Auto-play and redirect when generation completes
+          if (update.status === 'completed') {
+            try {
+              // Wait a moment for thumbnail to be generated
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              const item = await getHistoryItem(update.id);
+              setSelectedAudio(item);
+              setActiveTab('history');
+              fetchHistory();
+            } catch (e) {
+              console.error('Failed to auto-play:', e);
+              fetchHistory();
+            }
+          } else if (update.status === 'failed' || update.status === 'cancelled') {
+            fetchHistory();
+          }
         },
         () => {
           setTimeout(connectWebSocket, 3000);
@@ -99,7 +136,7 @@ function App() {
     return () => {
       ws?.close();
     };
-  }, [fetchHistory]);
+  }, [isAuthenticated, fetchHistory]);
 
   const handleGenerate = useCallback(() => {
     fetchQueue();
@@ -117,6 +154,30 @@ function App() {
     }
   }, [fetchHistory, selectedAudio]);
 
+  // Show loading spinner while checking auth state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="flex items-center gap-3 text-gray-400">
+          <svg className="animate-spin h-6 w-6" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          Loading...
+        </div>
+      </div>
+    );
+  }
+
+  // Show login/register if not authenticated
+  if (!isAuthenticated) {
+    return authView === 'login' ? (
+      <LoginForm onSwitchToRegister={() => setAuthView('register')} />
+    ) : (
+      <RegisterForm onSwitchToLogin={() => setAuthView('login')} />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-900">
       <header className="bg-gray-800 border-b border-gray-700">
@@ -126,17 +187,20 @@ function App() {
               <img src={heartmulaLogo} alt="HeartMuLa" className="h-10 w-auto" />
               <h1 className="text-2xl font-bold text-white">HeartMuLa</h1>
             </div>
-            {systemStatus && (
-              <div className="flex items-center gap-4 text-sm">
-                <span className={`flex items-center gap-1 ${systemStatus.gpu_available ? 'text-green-400' : 'text-red-400'}`}>
-                  <span className={`w-2 h-2 rounded-full ${systemStatus.gpu_available ? 'bg-green-400' : 'bg-red-400'}`} />
-                  {systemStatus.gpu_available ? systemStatus.gpu_name : 'No GPU'}
-                </span>
-                {systemStatus.model_loaded && (
-                  <span className="text-blue-400">Model loaded</span>
-                )}
-              </div>
-            )}
+            <div className="flex items-center gap-4">
+              {systemStatus && (
+                <div className="flex items-center gap-4 text-sm">
+                  <span className={`flex items-center gap-1 ${systemStatus.gpu_available ? 'text-green-400' : 'text-red-400'}`}>
+                    <span className={`w-2 h-2 rounded-full ${systemStatus.gpu_available ? 'bg-green-400' : 'bg-red-400'}`} />
+                    {systemStatus.gpu_available ? systemStatus.gpu_name : 'No GPU'}
+                  </span>
+                  {systemStatus.model_loaded && (
+                    <span className="text-blue-400">Model loaded</span>
+                  )}
+                </div>
+              )}
+              <UserMenu />
+            </div>
           </div>
         </div>
       </header>
@@ -213,6 +277,14 @@ function App() {
         />
       )}
     </div>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <MainApp />
+    </AuthProvider>
   );
 }
 

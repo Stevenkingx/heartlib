@@ -1,5 +1,34 @@
 export type GenerationStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
+// Auth types
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  created_at: string;
+}
+
+export interface Token {
+  access_token: string;
+  token_type: string;
+}
+
+export interface AuthResponse {
+  user: User;
+  token: Token;
+}
+
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  username: string;
+  email: string;
+  password: string;
+}
+
 export interface GenerationRequest {
   lyrics: string;
   tags: string;
@@ -44,6 +73,7 @@ export interface HistoryItem {
   temperature: number;
   topk: number;
   cfg_scale: number;
+  user_id: string | null;
 }
 
 export interface HistoryResponse {

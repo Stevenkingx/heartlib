@@ -1,9 +1,10 @@
 import os
 import asyncio
+import sqlite3
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,10 +21,22 @@ from .models import (
     AILyricsResponse,
     AIThumbnailRequest,
     AIThumbnailResponse,
+    UserCreate,
+    UserLogin,
+    User,
+    Token,
+    AuthResponse,
 )
 from .queue import get_queue, GenerationQueue
 from . import database
 from . import openai_service
+from .auth import (
+    get_current_user,
+    get_current_user_optional,
+    create_access_token,
+    get_password_hash,
+    verify_password,
+)
 
 
 class ConnectionManager:
@@ -109,6 +122,59 @@ app.add_middleware(
 )
 
 
+# Auth endpoints
+@app.post("/api/auth/register", response_model=AuthResponse)
+async def register(user_data: UserCreate):
+    """Register a new user."""
+    # Check if user already exists
+    if database.user_exists(email=user_data.email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    if database.user_exists(username=user_data.username):
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    # Create user
+    try:
+        password_hash = get_password_hash(user_data.password)
+        user = database.create_user(
+            username=user_data.username,
+            email=user_data.email,
+            password_hash=password_hash,
+        )
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="User already exists")
+
+    # Generate token
+    access_token = create_access_token(data={"sub": user.id})
+    return AuthResponse(
+        user=user,
+        token=Token(access_token=access_token),
+    )
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+async def login(credentials: UserLogin):
+    """Login and get an access token."""
+    result = database.get_user_by_email(credentials.email)
+    if not result:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    user, password_hash = result
+    if not verify_password(credentials.password, password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    access_token = create_access_token(data={"sub": user.id})
+    return AuthResponse(
+        user=user,
+        token=Token(access_token=access_token),
+    )
+
+
+@app.get("/api/auth/me", response_model=User)
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Get the current authenticated user."""
+    return current_user
+
+
 @app.get("/api/status", response_model=SystemStatus)
 async def get_status():
     return SystemStatus(
@@ -121,7 +187,10 @@ async def get_status():
 
 
 @app.post("/api/generate", response_model=GenerationResponse)
-async def generate(request: GenerationRequest):
+async def generate(
+    request: GenerationRequest,
+    current_user: User = Depends(get_current_user),
+):
     if not queue.gpu_available:
         raise HTTPException(status_code=503, detail="No GPU available for generation")
 
@@ -133,6 +202,7 @@ async def generate(request: GenerationRequest):
         temperature=request.temperature,
         topk=request.topk,
         cfg_scale=request.cfg_scale,
+        user_id=current_user.id,
     )
 
     return GenerationResponse(
@@ -143,15 +213,30 @@ async def generate(request: GenerationRequest):
 
 
 @app.get("/api/queue", response_model=QueueStatus)
-async def get_queue_status():
+async def get_queue_status(
+    current_user: User = Depends(get_current_user),
+):
+    # Filter queue items by user_id
+    all_items = queue.get_queue_status()
+    user_items = [item for item in all_items if queue.get_entry_user_id(item.id) == current_user.id]
+    active_id = queue.get_active_id()
+    # Only show active_id if it belongs to current user
+    if active_id and queue.get_entry_user_id(active_id) != current_user.id:
+        active_id = None
     return QueueStatus(
-        items=queue.get_queue_status(),
-        active_id=queue.get_active_id(),
+        items=user_items,
+        active_id=active_id,
     )
 
 
 @app.delete("/api/queue/{entry_id}")
-async def cancel_generation(entry_id: str):
+async def cancel_generation(
+    entry_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    # Check if entry belongs to current user
+    if queue.get_entry_user_id(entry_id) != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only cancel your own generations")
     if queue.cancel(entry_id):
         return {"message": "Generation cancelled"}
     raise HTTPException(status_code=404, detail="Entry not found in queue")
@@ -162,8 +247,9 @@ async def get_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
 ):
-    items, total = database.get_generations(page, page_size, search)
+    items, total = database.get_generations(page, page_size, search, user_id=current_user.id)
     return HistoryResponse(
         items=items,
         total=total,
@@ -173,18 +259,27 @@ async def get_history(
 
 
 @app.get("/api/history/{entry_id}", response_model=HistoryItem)
-async def get_history_item(entry_id: str):
+async def get_history_item(
+    entry_id: str,
+    current_user: User = Depends(get_current_user),
+):
     item = database.get_generation_by_id(entry_id)
     if not item:
         raise HTTPException(status_code=404, detail="Generation not found")
+    # Check ownership
+    if item.user_id and item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
     return item
 
 
 @app.delete("/api/history/{entry_id}")
-async def delete_history_item(entry_id: str):
-    if database.delete_generation(entry_id):
+async def delete_history_item(
+    entry_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    if database.delete_generation(entry_id, user_id=current_user.id):
         return {"message": "Generation deleted"}
-    raise HTTPException(status_code=404, detail="Generation not found")
+    raise HTTPException(status_code=404, detail="Generation not found or access denied")
 
 
 @app.get("/api/audio/{entry_id}")

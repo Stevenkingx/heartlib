@@ -4,6 +4,39 @@ from enum import Enum
 from datetime import datetime
 
 
+# Auth Models
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    email: str
+    password: str = Field(..., min_length=6)
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class User(BaseModel):
+    id: str
+    username: str
+    email: str
+    created_at: datetime
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class TokenData(BaseModel):
+    user_id: str
+
+
+class AuthResponse(BaseModel):
+    user: User
+    token: Token
+
+
 class GenerationStatus(str, Enum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -56,6 +89,7 @@ class HistoryItem(BaseModel):
     temperature: float
     topk: int
     cfg_scale: float
+    user_id: Optional[str] = None
 
 
 class HistoryResponse(BaseModel):

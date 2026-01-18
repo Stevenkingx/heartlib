@@ -175,11 +175,14 @@ HeartMuLa includes a web interface for easier music generation without using the
 
 ### Features
 
-- **User-friendly interface** - Input lyrics and tags through a modern web interface
+- **User Authentication** - Register and login to keep your generations private and organized
+- **Modern card-based UI** - Clean, modern interface with glass-morphism design
+- **AI-assisted lyrics** - Generate lyrics, tags and title using OpenAI (optional)
 - **Generation queue** - Queue multiple generations and track progress in real-time
-- **History** - Browse, play, and download your past generations
+- **History** - Browse, play, and download your past generations (per-user isolation)
 - **Auto GPU detection** - Automatically detects NVIDIA (CUDA), AMD (ROCm), or CPU
 - **Audio player** - Built-in player with download support
+- **Auto-generated thumbnails** - AI-generated album art using DALL-E (optional)
 
 ### Quick Start
 
@@ -202,6 +205,17 @@ HeartMuLa includes a web interface for easier music generation without using the
 
 3. **Open your browser** at http://localhost:5173
 
+4. **Create an account** - Register with username, email and password to start generating music
+
+### Database
+
+The Web UI uses SQLite for data storage. The database is automatically created on first run at `web/data/heartmula.db` with the following tables:
+
+- **users** - User accounts (id, username, email, password_hash, created_at)
+- **generations** - Music generations linked to users (includes audio path, settings, etc.)
+
+No manual database setup is required - migrations run automatically on startup.
+
 ### Start Script Options
 
 ```bash
@@ -222,21 +236,30 @@ You can also configure via environment variables:
 - `HEARTMULA_MODEL_PATH` - Path to model checkpoints
 - `HEARTMULA_VERSION` - Model version (3B or 1B)
 - `HEARTMULA_FP16` - Use float16 (true/false)
+- `JWT_SECRET_KEY` - Secret key for JWT tokens (auto-generated if not set)
+- `OPENAI_API_KEY` - OpenAI API key for AI lyrics and thumbnail generation (optional)
 
 ### API Endpoints
 
-The backend exposes a REST API:
+The backend exposes a REST API. Most endpoints require authentication via Bearer token.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/status` | GET | System status (GPU, model loaded) |
-| `/api/generate` | POST | Start a new generation |
-| `/api/queue` | GET | Get queue status |
-| `/api/queue/{id}` | DELETE | Cancel a generation |
-| `/api/history` | GET | List past generations |
-| `/api/history/{id}` | DELETE | Delete a generation |
-| `/api/audio/{id}` | GET | Stream/download audio file |
-| `/ws/progress` | WebSocket | Real-time progress updates |
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/api/status` | GET | No | System status (GPU, model loaded) |
+| `/api/auth/register` | POST | No | Create a new user account |
+| `/api/auth/login` | POST | No | Login and get JWT token |
+| `/api/auth/me` | GET | Yes | Get current user info |
+| `/api/generate` | POST | Yes | Start a new generation |
+| `/api/queue` | GET | Yes | Get queue status (user's items only) |
+| `/api/queue/{id}` | DELETE | Yes | Cancel a generation (owner only) |
+| `/api/history` | GET | Yes | List past generations (user's only) |
+| `/api/history/{id}` | GET | Yes | Get generation details (owner only) |
+| `/api/history/{id}` | DELETE | Yes | Delete a generation (owner only) |
+| `/api/audio/{id}` | GET | No | Stream/download audio file |
+| `/api/thumbnail/{id}` | GET | No | Get thumbnail image |
+| `/api/ai/lyrics` | POST | Yes | Generate lyrics with AI (requires OpenAI) |
+| `/api/ai/thumbnail` | POST | Yes | Generate thumbnail with AI (requires OpenAI) |
+| `/ws/progress` | WebSocket | No | Real-time progress updates |
 
 ---
 

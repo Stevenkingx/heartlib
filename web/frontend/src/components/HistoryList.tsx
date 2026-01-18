@@ -127,6 +127,7 @@ interface HistoryItemCardProps {
 
 function HistoryItemCard({ item, onPlay, onDelete, deleting }: HistoryItemCardProps) {
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   const formatDuration = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
@@ -143,7 +144,8 @@ function HistoryItemCard({ item, onPlay, onDelete, deleting }: HistoryItemCardPr
     });
   };
 
-  const hasThumbnail = item.thumbnail_path && !imageError;
+  // Always try to load thumbnail - API returns 404 if not available
+  const showThumbnail = !imageError;
 
   return (
     <div className="bg-gray-800 rounded-lg overflow-hidden border border-gray-700 hover:border-gray-600 transition-colors group">
@@ -152,14 +154,16 @@ function HistoryItemCard({ item, onPlay, onDelete, deleting }: HistoryItemCardPr
         onClick={onPlay}
         className="relative w-full aspect-square bg-gray-900 overflow-hidden"
       >
-        {hasThumbnail ? (
+        {showThumbnail && (
           <img
             src={getThumbnailUrl(item.id)}
             alt={item.title || 'Song thumbnail'}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${imageLoaded ? '' : 'hidden'}`}
+            onLoad={() => setImageLoaded(true)}
             onError={() => setImageError(true)}
           />
-        ) : (
+        )}
+        {(!showThumbnail || !imageLoaded) && (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-800 to-gray-900">
             <svg className="w-16 h-16 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />

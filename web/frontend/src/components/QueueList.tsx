@@ -82,7 +82,9 @@ function QueueItemCard({ item, position, isActive, onCancel }: QueueItemCardProp
             </h4>
             <p className="text-sm text-gray-400">
               {item.status === 'processing'
-                ? `Processing: ${item.progress}/${item.total_frames} frames (${progressPercent}%)`
+                ? item.progress >= item.total_frames
+                  ? 'Decoding audio...'
+                  : `Generating: ${item.progress}/${item.total_frames} frames (${progressPercent}%)`
                 : item.status === 'pending'
                 ? 'Waiting in queue...'
                 : item.status}
@@ -103,10 +105,14 @@ function QueueItemCard({ item, position, isActive, onCancel }: QueueItemCardProp
 
       {isActive && item.status === 'processing' && (
         <div className="relative h-2 bg-gray-700 rounded-full overflow-hidden">
-          <div
-            className="absolute inset-y-0 left-0 bg-blue-500 transition-all duration-300"
-            style={{ width: `${progressPercent}%` }}
-          />
+          {item.progress >= item.total_frames ? (
+            <div className="absolute inset-y-0 left-0 right-0 bg-gradient-to-r from-blue-500 via-blue-400 to-blue-500 animate-pulse" />
+          ) : (
+            <div
+              className="absolute inset-y-0 left-0 bg-blue-500 transition-all duration-300"
+              style={{ width: `${progressPercent}%` }}
+            />
+          )}
         </div>
       )}
 
