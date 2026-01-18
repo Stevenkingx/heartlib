@@ -107,6 +107,10 @@ export HEARTMULA_MODEL_PATH="$MODEL_PATH"
 export HEARTMULA_VERSION="$MODEL_VERSION"
 export HEARTMULA_FP16="$USE_FP16"
 
+# ROCm environment variables (for AMD GPUs)
+export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
+export HSA_OVERRIDE_GFX_VERSION="${HSA_OVERRIDE_GFX_VERSION:-12.0.1}"
+
 echo "================================"
 echo "HeartMuLa Web UI"
 echo "================================"

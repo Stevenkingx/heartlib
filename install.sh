@@ -140,8 +140,20 @@ install_python_deps() {
             pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
             ;;
         amd)
-            print_status "Installing PyTorch with ROCm support..."
-            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+            print_status "Installing PyTorch with ROCm 7.1 support..."
+
+            # Set ROCm environment variables
+            export ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
+            export HSA_OVERRIDE_GFX_VERSION="${HSA_OVERRIDE_GFX_VERSION:-12.0.1}"
+
+            pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/rocm7.1
+
+            # Verify ROCm installation
+            if python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+                print_success "ROCm PyTorch verified: $(python -c 'import torch; print(torch.cuda.get_device_name(0))')"
+            else
+                print_warning "ROCm may need additional configuration. Check HSA_OVERRIDE_GFX_VERSION for your GPU."
+            fi
             ;;
         cpu)
             print_status "Installing PyTorch (CPU only)..."
