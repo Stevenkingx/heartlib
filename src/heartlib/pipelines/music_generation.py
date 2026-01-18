@@ -7,9 +7,8 @@ from typing import Dict, Any, Optional
 import os
 from dataclasses import dataclass
 from tqdm import tqdm
-import torchaudio
+import soundfile as sf
 import json
-from transformers import BitsAndBytesConfig
 
 
 @dataclass
@@ -87,7 +86,7 @@ class HeartMuLaGenPipeline(Pipeline):
         if ref_audio is not None:
             raise NotImplementedError("ref_audio is not supported yet.")
         muq_embed = torch.zeros([self._muq_dim], dtype=self.dtype)
-        muq_idx = len(tags)
+        muq_idx = len(tags_ids)  # Fixed: was len(tags) which is string length, not token length
 
         # process lyrics
         lyrics = inputs["lyrics"]
@@ -198,12 +197,29 @@ class HeartMuLaGenPipeline(Pipeline):
                 break
             frames.append(curr_token[0:1,])
         frames = torch.stack(frames).permute(1, 2, 0).squeeze(0)
-        wav = self.audio_codec.detokenize(frames)
-        return {"wav": wav}
+        # Free GPU memory before detokenize
+        codec_device = next(self.audio_codec.parameters()).device
+        if codec_device.type == "cpu":
+            # Free model from GPU to make room for codec
+            self.model.to("cpu")
+            torch.cuda.empty_cache()
+            self.audio_codec.to(self.device)
+            wav = self.audio_codec.detokenize(frames.to(self.device))
+            self.audio_codec.to("cpu")
+            torch.cuda.empty_cache()
+        else:
+            wav = self.audio_codec.detokenize(frames)
+        return {"wav": wav.cpu()}
 
     def postprocess(self, model_outputs: Dict[str, Any], save_path: str):
         wav = model_outputs["wav"]
-        torchaudio.save(save_path, wav, 48000)
+        # Use WAV format (soundfile doesn't support mp3)
+        if save_path.endswith('.mp3'):
+            save_path = save_path.replace('.mp3', '.wav')
+            print(f"Note: Saving as WAV instead of MP3")
+        # wav shape is (channels, samples), soundfile expects (samples, channels)
+        wav_np = wav.numpy().T
+        sf.write(save_path, wav_np, 48000)
 
     @classmethod
     def from_pretrained(
@@ -212,13 +228,13 @@ class HeartMuLaGenPipeline(Pipeline):
         device: torch.device,
         dtype: torch.dtype,
         version: str,
-        bnb_config: Optional[BitsAndBytesConfig] = None,
     ):
 
         if os.path.exists(
             heartcodec_path := os.path.join(pretrained_path, "HeartCodec-oss")
         ):
-            heartcodec = HeartCodec.from_pretrained(heartcodec_path, device_map=device)
+            # Load codec on CPU to save VRAM, will move to GPU only for detokenize
+            heartcodec = HeartCodec.from_pretrained(heartcodec_path, device_map="cpu")
         else:
             raise FileNotFoundError(
                 f"Expected to find checkpoint for HeartCodec at {heartcodec_path} but not found. Please check your folder {pretrained_path}."
@@ -228,8 +244,11 @@ class HeartMuLaGenPipeline(Pipeline):
             heartmula_path := os.path.join(pretrained_path, f"HeartMuLa-oss-{version}")
         ):
             heartmula = HeartMuLa.from_pretrained(
-                heartmula_path, dtype=dtype, quantization_config=bnb_config
+                heartmula_path,
+                torch_dtype=dtype,
+                low_cpu_mem_usage=True,
             )
+            heartmula = heartmula.to(device)
         else:
             raise FileNotFoundError(
                 f"Expected to find checkpoint for HeartMuLa at {heartmula_path} but not found. Please check your folder {pretrained_path}."

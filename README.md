@@ -169,6 +169,77 @@ piano,happy,wedding,synthesizer,romantic
 
 ---
 
+## 🌐 Web UI
+
+HeartMuLa includes a web interface for easier music generation without using the command line.
+
+### Features
+
+- **User-friendly interface** - Input lyrics and tags through a modern web interface
+- **Generation queue** - Queue multiple generations and track progress in real-time
+- **History** - Browse, play, and download your past generations
+- **Auto GPU detection** - Automatically detects NVIDIA (CUDA), AMD (ROCm), or CPU
+- **Audio player** - Built-in player with download support
+
+### Quick Start
+
+1. **Install dependencies and build the frontend:**
+   ```bash
+   ./install.sh
+   ```
+   The installer will:
+   - Detect your GPU (NVIDIA/AMD/CPU)
+   - Set up a Python virtual environment
+   - Install PyTorch with appropriate GPU support
+   - Install all dependencies
+   - Build the web frontend
+   - Optionally download model checkpoints
+
+2. **Start the Web UI:**
+   ```bash
+   ./start.sh
+   ```
+
+3. **Open your browser** at http://localhost:5173
+
+### Start Script Options
+
+```bash
+./start.sh [OPTIONS]
+
+Options:
+  --model-path PATH    Path to model checkpoints (default: ./ckpt)
+  --version VERSION    Model version: 3B or 1B (default: 3B)
+  --fp16               Use float16 instead of bfloat16
+  --dev                Run in development mode (hot reload)
+  --backend-port PORT  Backend server port (default: 8000)
+  --frontend-port PORT Frontend dev server port (default: 5173)
+```
+
+### Environment Variables
+
+You can also configure via environment variables:
+- `HEARTMULA_MODEL_PATH` - Path to model checkpoints
+- `HEARTMULA_VERSION` - Model version (3B or 1B)
+- `HEARTMULA_FP16` - Use float16 (true/false)
+
+### API Endpoints
+
+The backend exposes a REST API:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/status` | GET | System status (GPU, model loaded) |
+| `/api/generate` | POST | Start a new generation |
+| `/api/queue` | GET | Get queue status |
+| `/api/queue/{id}` | DELETE | Cancel a generation |
+| `/api/history` | GET | List past generations |
+| `/api/history/{id}` | DELETE | Delete a generation |
+| `/api/audio/{id}` | GET | Stream/download audio file |
+| `/ws/progress` | WebSocket | Real-time progress updates |
+
+---
+
 ## 🙏 Acknowledgements
 
 This repository is developed on the basis of [ConversationTTS](https://github.com/Audio-Foundation-Models/ConversationTTS). We thank the authors for their open source contributions.

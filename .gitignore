@@ -8,3 +8,24 @@ checkpoint/
 **.egg-info/
 build/
 .idea/
+
+# Model checkpoints (too large for git)
+ckpt/
+
+# Python virtual environment
+venv/
+.venv/
+
+# Node.js
+node_modules/
+web/frontend/dist/
+
+# Web UI data
+web/data/
+
+# User files
+assets/my_*.txt
+
+# Environment
+start_env.sh
+.env
